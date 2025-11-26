@@ -14,6 +14,8 @@ import requests
 import sys
 import os
 from typing import Dict, List, Tuple, Optional
+from conversation_manager import ConversationManager
+from context_manager import ContextManager
 
 class BasicShellAgent:
     """基础Shell代理 - 实现思考-执行-观察循环"""
@@ -24,6 +26,11 @@ class BasicShellAgent:
         self.context_limit = 88888
         self.conversation_history = []
         self.system_prompt = self._build_system_prompt()
+
+        # 初始化对话管理器
+        self.conversation_manager = ConversationManager()
+        self.context_manager = ContextManager(self.conversation_manager, self.context_limit)
+        self.context_manager.set_system_prompt(self.system_prompt)
         
     def _build_system_prompt(self) -> str:
         """构建系统提示词"""
@@ -129,7 +136,7 @@ ls -la
         data = {
             "model": "deepseek-chat",
             "messages": messages,
-            "max_tokens": 8000,
+            "max_tokens": 4000,
             "temperature": 0.3
         }
         
@@ -244,12 +251,26 @@ ls -la
             return
 
         print("✓ Linux环境检查通过")
-        
-        # 初始化对话
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": f"任务: {user_task}"}
-        ]
+
+        # 获取上下文信息
+        context_info = self.context_manager.get_context_info()
+        print(f"对话记录: {context_info['total_conversations']} 条, "
+              f"Token: {context_info['current_tokens']}/{context_info['context_limit']}")
+
+        # 初始化对话上下文
+        if context_info['should_start_new'] or context_info['total_conversations'] == 0:
+            print("开始新的对话...")
+            messages = self.context_manager.build_initial_context()
+        else:
+            print("继续之前的对话...")
+            messages = self.context_manager.build_initial_context()
+
+        # 添加用户任务到上下文
+        messages = self.context_manager.add_user_message(
+            context=messages,
+            message=f"任务: {user_task}",
+            save_record=True
+        )
         
         max_iterations = 999  # 防止无限循环
         iteration = 0
@@ -257,20 +278,36 @@ ls -la
         while iteration < max_iterations:
             iteration += 1
             print(f"\n--- 第 {iteration} 轮思考-执行-观察 ---")
-            
+
+            # 截断上下文以适应token限制
+            messages = self.context_manager.truncate_context_if_needed(messages)
+
             # 获取AI响应
             ai_response = self._call_deepseek_api(messages)
             if "API调用错误" in ai_response:
                 self._format_output(ai_response, "error")
+                # 保存错误到对话记录
+                self.context_manager.add_assistant_message(
+                    context=messages,
+                    message=ai_response,
+                    save_record=True
+                )
                 break
-            
+
+            # 保存AI响应到对话记录
+            messages = self.context_manager.add_assistant_message(
+                context=messages,
+                message=ai_response,
+                save_record=True
+            )
+
             # 解析响应
             parsed = self._parse_agent_response(ai_response)
-            
+
             # 显示思考过程
             for think in parsed["think"]:
                 self._format_output(think, "think")
-            
+
             # 执行命令
             command_executed = False
             for exec_cmd in parsed["exec"]:
@@ -286,27 +323,33 @@ ls -la
                         print("命令无输出")
                     print(f"返回码: {return_code}")
 
-                    # 将执行结果添加到对话历史
-                    messages.append({
-                        "role": "assistant",
-                        "content": ai_response
-                    })
-                    messages.append({
-                        "role": "user",
-                        "content": f"命令 '{command}' 执行结果:\n输出: {output}\n返回码: {return_code}\n\n请基于这个真实的执行结果继续思考下一步操作。"
-                    })
+                    # 将执行结果添加到上下文和对话记录
+                    messages = self.context_manager.add_command_execution_result(
+                        context=messages,
+                        command=command,
+                        output=output,
+                        return_code=return_code,
+                        save_record=True
+                    )
                     command_executed = True
                     break  # 一次只执行一个命令，等待AI基于结果思考下一步
-            
+
             # 不再显示观察结果，因为AI不应该自己编造观察内容
-            
+
             # 检查是否有最终结果
             if parsed["result"]:
                 for result in parsed["result"]:
                     self._format_output(result, "result")
                 print("\n任务完成!")
+                # 保存最终结果到对话记录
+                final_result = "\n".join(parsed["result"])
+                self.context_manager.add_assistant_message(
+                    context=messages,
+                    message=f"[RESULT]\n{final_result}\n[/RESULT]",
+                    save_record=True
+                )
                 break
-            
+
             # 如果没有执行命令，可能任务已完成或需要更多信息
             if not command_executed:
                 if "完成" in ai_response or "结束" in ai_response:
@@ -314,10 +357,11 @@ ls -la
                     break
                 else:
                     # 询问是否需要更多信息
-                    messages.append({
-                        "role": "user", 
-                        "content": "请继续思考并执行下一步操作，或者如果任务已完成请用[RESULT]标签说明结果。"
-                    })
+                    messages = self.context_manager.add_user_message(
+                        context=messages,
+                        message="请继续思考并执行下一步操作，或者如果任务已完成请用[RESULT]标签说明结果。",
+                        save_record=True
+                    )
         
         if iteration >= max_iterations:
             print(f"\n达到最大迭代次数 ({max_iterations})，任务可能未完全完成。")
