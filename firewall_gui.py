@@ -64,11 +64,11 @@ class FirewallGUI:
         # 规则管理区域
         self.create_rules_section(main_frame)
 
+        # 程序豁免按钮区域 - 移到前面
+        self.create_program_button_section(main_frame)
+
         # 日志区域
         self.create_log_section(main_frame)
-
-        # 程序豁免按钮区域
-        self.create_program_button_section(main_frame)
 
     def create_status_section(self, parent):
         """创建状态显示区域"""
@@ -150,8 +150,17 @@ class FirewallGUI:
         program_frame = ttk.LabelFrame(parent, text="程序豁免管理", padding="10")
         program_frame.pack(fill=tk.X, pady=(10, 0))
 
-        ttk.Button(program_frame, text="打开程序豁免管理器", command=self.open_program_exemption_window,
-                  width=25).pack()
+        # 创建一个更醒目的按钮
+        button = ttk.Button(program_frame, text="🚀 打开程序豁免管理器",
+                           command=self.open_program_exemption_window,
+                           width=30)
+        button.pack(pady=5)
+
+        # 添加说明文字
+        help_label = ttk.Label(program_frame,
+                              text="管理应用程序的网络访问权限，为需要的程序开放端口",
+                              font=("Arial", 9), foreground="gray")
+        help_label.pack(pady=(0, 5))
 
     def open_program_exemption_window(self):
         """打开程序豁免管理窗口"""
@@ -431,29 +440,41 @@ class ProgramExemptionWindow:
                 programs = self.ufw.get_all_listening_programs()
 
                 def update_ui():
-                    # 清空现有项目
-                    for item in self.programs_tree.get_children():
-                        self.programs_tree.delete(item)
+                    try:
+                        # 检查窗口是否还存在
+                        if hasattr(self, 'programs_tree') and self.programs_tree.winfo_exists():
+                            # 清空现有项目
+                            for item in self.programs_tree.get_children():
+                                self.programs_tree.delete(item)
 
-                    # 添加程序项目
-                    for prog in programs:
-                        self.programs_tree.insert("", "end", values=(
-                            prog['name'],
-                            prog['pid'],
-                            prog['port'],
-                            prog['protocol'],
-                            prog['address']
-                        ))
+                            # 添加程序项目
+                            for prog in programs:
+                                self.programs_tree.insert("", "end", values=(
+                                    prog['name'],
+                                    prog['pid'],
+                                    prog['port'],
+                                    prog['protocol'],
+                                    prog['address']
+                                ))
 
-                    print(f"[EXEMPTION] 已加载 {len(programs)} 个程序")
-                    self.status_label.config(text=f"已找到 {len(programs)} 个活动程序")
+                            print(f"[EXEMPTION] 已加载 {len(programs)} 个程序")
+                            if hasattr(self, 'status_label') and self.status_label.winfo_exists():
+                                self.status_label.config(text=f"已找到 {len(programs)} 个活动程序")
+                        else:
+                            print("[EXEMPTION] 窗口已关闭，停止更新程序列表")
+                    except tk.TclError:
+                        print("[EXEMPTION] 窗口已关闭，停止更新程序列表")
 
                 self.window.after(0, update_ui)
 
             except Exception as e:
                 print(f"[EXEMPTION] 加载程序列表失败: {e}")
                 def update_error():
-                    self.status_label.config(text="加载程序列表失败")
+                    try:
+                        if hasattr(self, 'status_label') and self.status_label.winfo_exists():
+                            self.status_label.config(text="加载程序列表失败")
+                    except tk.TclError:
+                        print("[EXEMPTION] 窗口已关闭，停止更新状态")
                 self.window.after(0, update_error)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -479,7 +500,13 @@ class ProgramExemptionWindow:
             success_count = 0
             total_count = len(ports_to_allow)
 
-            self.window.after(0, lambda: self.status_label.config(text=f"正在处理 {total_count} 个程序..."))
+            def update_status():
+                try:
+                    if hasattr(self, 'status_label') and self.status_label.winfo_exists():
+                        self.status_label.config(text=f"正在处理 {total_count} 个程序...")
+                except tk.TclError:
+                    print("[EXEMPTION] 窗口已关闭，停止更新状态")
+            self.window.after(0, update_status)
 
             for program_name, port, protocol in ports_to_allow:
                 try:
@@ -493,13 +520,18 @@ class ProgramExemptionWindow:
                     print(f"[EXEMPTION] 允许程序端口异常: {e}")
 
             def update_ui():
-                if success_count > 0:
-                    messagebox.showinfo("成功", f"已为 {success_count}/{total_count} 个程序添加防火墙豁免")
-                    print(f"[EXEMPTION] 成功为 {success_count}/{total_count} 个程序添加豁免")
-                    self.status_label.config(text=f"成功为 {success_count}/{total_count} 个程序添加豁免")
-                else:
-                    messagebox.showerror("失败", "添加防火墙豁免失败")
-                    self.status_label.config(text="添加防火墙豁免失败")
+                try:
+                    if success_count > 0:
+                        messagebox.showinfo("成功", f"已为 {success_count}/{total_count} 个程序添加防火墙豁免")
+                        print(f"[EXEMPTION] 成功为 {success_count}/{total_count} 个程序添加豁免")
+                        if hasattr(self, 'status_label') and self.status_label.winfo_exists():
+                            self.status_label.config(text=f"成功为 {success_count}/{total_count} 个程序添加豁免")
+                    else:
+                        messagebox.showerror("失败", "添加防火墙豁免失败")
+                        if hasattr(self, 'status_label') and self.status_label.winfo_exists():
+                            self.status_label.config(text="添加防火墙豁免失败")
+                except tk.TclError:
+                    print("[EXEMPTION] 窗口已关闭，停止更新状态")
 
             self.window.after(0, update_ui)
 

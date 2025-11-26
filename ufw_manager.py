@@ -79,15 +79,22 @@ class UFWManager:
         if not success:
             return {"active": False, "error": output}
 
-        active = "Status: active" in output
-        logging = "Logging: on" in output
+        # 支持中英文状态检测
+        active = ("Status: active" in output) or ("状态：激活" in output)
+        logging = ("Logging: on" in output) or ("日志：on" in output)
 
         # 解析规则
         rules = []
         lines = output.split('\n')
         for line in lines:
-            if line.strip() and not line.startswith('Status:') and not line.startswith('Logging:') and not line.startswith('Default:'):
-                if 'ALLOW' in line or 'DENY' in line:
+            if line.strip():
+                # 跳过状态行（支持中英文）
+                if (line.startswith('Status:') or line.startswith('状态：') or
+                    line.startswith('Logging:') or line.startswith('日志：') or
+                    line.startswith('Default:') or line.startswith('默认：')):
+                    continue
+                # 匹配规则行
+                if ('ALLOW' in line or 'DENY' in line or 'allow' in line or 'deny' in line):
                     rules.append(line.strip())
 
         return {

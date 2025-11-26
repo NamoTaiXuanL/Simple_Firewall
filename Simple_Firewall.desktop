@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Simple_Firewall
+Exec=python3 /home/mamoniel/文档/Simple_Firewall/main.py
+Comment=
+Terminal=false
+PrefersNonDefaultGPU=false
+Icon=cinnamon-panel-launcher
+Type=Application
