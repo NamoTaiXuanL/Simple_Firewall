@@ -27,14 +27,12 @@ class FirewallGUI:
     def create_widgets(self):
         """创建界面组件"""
 
-        # 主容器
+        # 主容器 - 使用pack布局
         main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
         # 配置网格权重
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
+        main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(3, weight=1)
 
         # 状态区域
@@ -52,7 +50,7 @@ class FirewallGUI:
     def create_status_section(self, parent):
         """创建状态显示区域"""
         status_frame = ttk.LabelFrame(parent, text="防火墙状态", padding="10")
-        status_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        status_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.status_label = ttk.Label(status_frame, text="状态：检查中...", font=("Arial", 12))
         self.status_label.pack(anchor=tk.W)
@@ -63,7 +61,7 @@ class FirewallGUI:
     def create_quick_actions_section(self, parent):
         """创建快速操作区域"""
         actions_frame = ttk.LabelFrame(parent, text="快速操作", padding="10")
-        actions_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        actions_frame.pack(fill=tk.X, pady=(0, 10))
 
         # 第一行按钮
         btn_frame1 = ttk.Frame(actions_frame)
@@ -89,7 +87,7 @@ class FirewallGUI:
     def create_rules_section(self, parent):
         """创建规则管理区域"""
         rules_frame = ttk.LabelFrame(parent, text="规则管理", padding="10")
-        rules_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        rules_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # 添加规则区域
         add_frame = ttk.Frame(rules_frame)
@@ -105,11 +103,11 @@ class FirewallGUI:
         # 规则列表
         self.rules_tree = ttk.Treeview(rules_frame, columns=("rule",), show="headings", height=8)
         self.rules_tree.heading("rule", text="规则")
-        self.rules_tree.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.rules_tree.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # 规则操作按钮
         rules_btn_frame = ttk.Frame(rules_frame)
-        rules_btn_frame.grid(row=2, column=0, columnspan=2, pady=(10, 0))
+        rules_btn_frame.pack(fill=tk.X)
 
         ttk.Button(rules_btn_frame, text="删除选中", command=self.delete_selected_rule).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(rules_btn_frame, text="刷新规则", command=self.refresh_rules).pack(side=tk.LEFT)
@@ -117,15 +115,12 @@ class FirewallGUI:
     def create_log_section(self, parent):
         """创建日志显示区域"""
         log_frame = ttk.LabelFrame(parent, text="防火墙日志", padding="10")
-        log_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
-
-        log_frame.columnconfigure(0, weight=1)
-        log_frame.rowconfigure(0, weight=1)
+        log_frame.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=10, wrap=tk.WORD)
-        self.log_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.log_text.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
-        ttk.Button(log_frame, text="刷新日志", command=self.refresh_logs).pack(anchor=tk.W, pady=(5, 0))
+        ttk.Button(log_frame, text="刷新日志", command=self.refresh_logs).pack(anchor=tk.W)
 
     def refresh_status(self):
         """刷新防火墙状态"""
