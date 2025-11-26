@@ -9,7 +9,7 @@ from ufw_manager import UFWManager
 class FirewallGUI:
     """简易防火墙图形界面"""
 
-    def __init__(self, root):
+    def __init__(self, root, sudo_password=None):
         self.root = root
         self.ufw = UFWManager()
 
@@ -20,11 +20,33 @@ class FirewallGUI:
 
         print("[GUI] 防火墙界面初始化")
 
+        # 获取sudo密码
+        if sudo_password:
+            print("[GUI] 使用命令行提供的密码")
+            self.ufw.set_sudo_password(sudo_password)
+        else:
+            if not self.get_sudo_password():
+                return
+
         # 创建主框架
         self.create_widgets()
 
         # 初始加载状态
         self.refresh_status()
+
+    def get_sudo_password(self):
+        """获取sudo密码"""
+        password_dialog = PasswordDialog(self.root)
+        password = password_dialog.get_password()
+
+        if password:
+            self.ufw.set_sudo_password(password)
+            print("[GUI] sudo密码已设置")
+            return True
+        else:
+            print("[GUI] 用户取消密码输入，程序退出")
+            self.root.destroy()
+            return False
 
     def create_widgets(self):
         """创建界面组件"""
@@ -44,6 +66,9 @@ class FirewallGUI:
 
         # 日志区域
         self.create_log_section(main_frame)
+
+        # 程序豁免区域
+        self.create_program_exemption_section(main_frame)
 
     def create_status_section(self, parent):
         """创建状态显示区域"""
@@ -115,10 +140,127 @@ class FirewallGUI:
         log_frame = ttk.LabelFrame(parent, text="防火墙日志", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=10, wrap=tk.WORD)
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=8, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
         ttk.Button(log_frame, text="刷新日志", command=self.refresh_logs).pack(anchor=tk.W)
+
+    def create_program_exemption_section(self, parent):
+        """创建程序豁免区域"""
+        program_frame = ttk.LabelFrame(parent, text="程序豁免管理", padding="10")
+        program_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 控制按钮
+        btn_frame = ttk.Frame(program_frame)
+        btn_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(btn_frame, text="获取活动程序", command=self.load_programs).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(btn_frame, text="允许选中程序", command=self.allow_selected_programs).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(btn_frame, text="刷新", command=self.load_programs).pack(side=tk.LEFT)
+
+        # 程序列表
+        columns = ('name', 'pid', 'port', 'protocol', 'address')
+        self.programs_tree = ttk.Treeview(program_frame, columns=columns, show='headings', height=10)
+
+        # 设置列标题
+        self.programs_tree.heading('name', text='程序名称')
+        self.programs_tree.heading('pid', text='PID')
+        self.programs_tree.heading('port', text='端口')
+        self.programs_tree.heading('protocol', text='协议')
+        self.programs_tree.heading('address', text='监听地址')
+
+        # 设置列宽
+        self.programs_tree.column('name', width=200)
+        self.programs_tree.column('pid', width=80)
+        self.programs_tree.column('port', width=80)
+        self.programs_tree.column('protocol', width=80)
+        self.programs_tree.column('address', width=200)
+
+        self.programs_tree.pack(fill=tk.BOTH, expand=True)
+
+        # 启用多选
+        self.programs_tree.configure(selectmode='extended')
+
+        # 初始加载
+        self.load_programs()
+
+    def load_programs(self):
+        """加载程序列表"""
+        print("[GUI] 开始加载程序列表")
+
+        def worker():
+            try:
+                print("[GUI] 正在获取活动程序...")
+                programs = self.ufw.get_all_listening_programs()
+
+                def update_ui():
+                    # 清空现有项目
+                    for item in self.programs_tree.get_children():
+                        self.programs_tree.delete(item)
+
+                    # 添加程序项目
+                    for prog in programs:
+                        self.programs_tree.insert("", "end", values=(
+                            prog['name'],
+                            prog['pid'],
+                            prog['port'],
+                            prog['protocol'],
+                            prog['address']
+                        ))
+
+                    print(f"[GUI] 已加载 {len(programs)} 个程序")
+
+                self.root.after(0, update_ui)
+
+            except Exception as e:
+                print(f"[GUI] 加载程序列表失败: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def allow_selected_programs(self):
+        """允许选中的程序通过防火墙"""
+        selected = self.programs_tree.selection()
+        if not selected:
+            messagebox.showwarning("警告", "请选择要豁免的程序")
+            return
+
+        # 获取选中程序的端口信息
+        ports_to_allow = []
+        for item in selected:
+            values = self.programs_tree.item(item, 'values')
+            if len(values) >= 4:
+                program_name = values[0]
+                port = values[2]
+                protocol = values[3]
+                ports_to_allow.append((program_name, port, protocol))
+
+        def worker():
+            success_count = 0
+            total_count = len(ports_to_allow)
+
+            for program_name, port, protocol in ports_to_allow:
+                try:
+                    print(f"[GUI] 允许程序 {program_name} 端口 {port}/{protocol}")
+                    success, output = self.ufw.allow_program_by_port(port, protocol)
+                    if success:
+                        success_count += 1
+                    else:
+                        print(f"[GUI] 允许端口失败: {output}")
+                except Exception as e:
+                    print(f"[GUI] 允许程序端口异常: {e}")
+
+            def update_ui():
+                if success_count > 0:
+                    messagebox.showinfo("成功", f"已为 {success_count}/{total_count} 个程序添加防火墙豁免")
+                    print(f"[GUI] 成功为 {success_count}/{total_count} 个程序添加豁免")
+                    self.refresh_status()
+                    self.refresh_rules()
+                else:
+                    messagebox.showerror("失败", "添加防火墙豁免失败")
+
+            self.root.after(0, update_ui)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def refresh_status(self):
         """刷新防火墙状态"""
@@ -308,7 +450,86 @@ class FirewallGUI:
         else:
             messagebox.showerror("错误", f"{operation}失败\n{output}")
 
+class PasswordDialog:
+    """密码输入对话框"""
+
+    def __init__(self, parent):
+        self.password = None
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("需要管理员权限")
+        self.dialog.geometry("400x200")
+        self.dialog.resizable(False, False)
+
+        # 模态对话框
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        # 居中显示
+        self.dialog.update_idletasks()
+        x = (self.dialog.winfo_screenwidth() // 2) - (self.dialog.winfo_width() // 2)
+        y = (self.dialog.winfo_screenheight() // 2) - (self.dialog.winfo_height() // 2)
+        self.dialog.geometry(f"+{x}+{y}")
+
+        self.create_widgets()
+
+        # 绑定Enter键
+        self.dialog.bind('<Return>', lambda e: self.ok_button_clicked())
+        self.dialog.bind('<Escape>', lambda e: self.cancel_button_clicked())
+
+        # 等待对话框关闭
+        self.dialog.wait_window()
+
+    def create_widgets(self):
+        """创建界面组件"""
+        # 说明文字
+        label = ttk.Label(self.dialog, text="防火墙管理需要管理员权限\n请输入sudo密码：",
+                         font=("Arial", 12), justify="center")
+        label.pack(pady=20)
+
+        # 密码输入框
+        password_frame = ttk.Frame(self.dialog)
+        password_frame.pack(pady=10)
+
+        ttk.Label(password_frame, text="密码：").pack(side=tk.LEFT, padx=(0, 10))
+        self.password_entry = ttk.Entry(password_frame, show="*", width=20, font=("Arial", 12))
+        self.password_entry.pack(side=tk.LEFT)
+
+        # 焦点设置到密码框
+        self.password_entry.focus()
+
+        # 按钮区域
+        button_frame = ttk.Frame(self.dialog)
+        button_frame.pack(pady=20)
+
+        self.ok_button = ttk.Button(button_frame, text="确定", command=self.ok_button_clicked)
+        self.ok_button.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.cancel_button = ttk.Button(button_frame, text="取消", command=self.cancel_button_clicked)
+        self.cancel_button.pack(side=tk.LEFT)
+
+    def ok_button_clicked(self):
+        """确定按钮点击"""
+        password = self.password_entry.get().strip()
+        if password:
+            self.password = password
+            print("[GUI] 用户输入了密码")
+        else:
+            messagebox.showwarning("警告", "请输入密码")
+            return
+
+        self.dialog.destroy()
+
+    def cancel_button_clicked(self):
+        """取消按钮点击"""
+        print("[GUI] 用户取消输入密码")
+        self.dialog.destroy()
+
+    def get_password(self):
+        """获取密码"""
+        return self.password
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = FirewallGUI(root)
-    root.mainloop()
+    if hasattr(app, 'ufw'):  # 检查程序是否正常初始化
+        root.mainloop()

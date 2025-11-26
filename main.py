@@ -9,6 +9,7 @@
 import tkinter as tk
 from tkinter import messagebox
 import os
+import sys
 
 def check_requirements():
     """检查运行环境"""
@@ -33,6 +34,13 @@ def main():
     """主函数"""
     print("[MAIN] 启动防火墙管理工具")
 
+    # 检查命令行参数中的密码
+    sudo_password = None
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--password" and len(sys.argv) > 2:
+            sudo_password = sys.argv[2]
+            print("[MAIN] 从命令行获取sudo密码")
+
     if not check_requirements():
         return
 
@@ -40,7 +48,7 @@ def main():
         from firewall_gui import FirewallGUI
 
         root = tk.Tk()
-        app = FirewallGUI(root)
+        app = FirewallGUI(root, sudo_password)
 
         # 居中窗口
         root.update_idletasks()
