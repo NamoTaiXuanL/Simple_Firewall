@@ -9,13 +9,14 @@ from ufw_manager import UFWManager
 class FirewallGUI:
     """简易防火墙图形界面"""
 
-    def __init__(self, root):
+    def __init__(self, root, debug=False):
         self.root = root
-        self.ufw = UFWManager()
+        self.debug = debug
+        self.ufw = UFWManager(debug=debug)
 
         # 设置窗口
-        self.root.title("简易防火墙管理工具")
-        self.root.geometry("800x600")
+        self.root.title(f"简易防火墙管理工具{' - 调试模式' if debug else ''}")
+        self.root.geometry("900x700" if debug else "800x600")
         self.root.resizable(True, True)
 
         # 创建主框架
@@ -23,6 +24,28 @@ class FirewallGUI:
 
         # 初始加载状态
         self.refresh_status()
+
+        if debug:
+            self.log_debug("防火墙图形界面初始化完成")
+
+    def log_debug(self, message):
+        """记录调试信息到界面"""
+        if self.debug and hasattr(self, 'debug_text'):
+            import datetime
+            timestamp = datetime.datetime.now().strftime('%H:%M:%S')
+            debug_msg = f"[{timestamp}] {message}\n"
+            self.root.after(0, lambda: self._append_debug(debug_msg))
+
+    def _append_debug(self, message):
+        """在调试文本框中追加信息"""
+        if hasattr(self, 'debug_text'):
+            self.debug_text.insert(tk.END, message)
+            self.debug_text.see(tk.END)
+
+            # 限制调试信息长度，避免内存占用过多
+            lines = int(self.debug_text.index('end-1c').split('.')[0])
+            if lines > 1000:
+                self.debug_text.delete('1.0', '100.0')
 
     def create_widgets(self):
         """创建界面组件"""
@@ -33,7 +56,7 @@ class FirewallGUI:
 
         # 配置网格权重
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(3, weight=1)
+        main_frame.rowconfigure(4 if self.debug else 3, weight=1)
 
         # 状态区域
         self.create_status_section(main_frame)
@@ -46,6 +69,10 @@ class FirewallGUI:
 
         # 日志区域
         self.create_log_section(main_frame)
+
+        # 调试信息区域（仅在调试模式下显示）
+        if self.debug:
+            self.create_debug_section(main_frame)
 
     def create_status_section(self, parent):
         """创建状态显示区域"""
@@ -117,34 +144,96 @@ class FirewallGUI:
         log_frame = ttk.LabelFrame(parent, text="防火墙日志", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=10, wrap=tk.WORD)
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=8 if self.debug else 10, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
         ttk.Button(log_frame, text="刷新日志", command=self.refresh_logs).pack(anchor=tk.W)
 
+    def create_debug_section(self, parent):
+        """创建调试信息显示区域"""
+        debug_frame = ttk.LabelFrame(parent, text="调试信息", padding="10")
+        debug_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 调试控制按钮
+        debug_btn_frame = ttk.Frame(debug_frame)
+        debug_btn_frame.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Button(debug_btn_frame, text="清空调试信息", command=self.clear_debug).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(debug_btn_frame, text="保存调试日志", command=self.save_debug_log).pack(side=tk.LEFT)
+
+        # 调试信息文本框
+        self.debug_text = scrolledtext.ScrolledText(debug_frame, height=8, wrap=tk.WORD)
+        self.debug_text.pack(fill=tk.BOTH, expand=True)
+
+        # 设置字体为等宽字体，便于查看调试信息
+        import tkinter.font as tkFont
+        mono_font = tkFont.Font(family="Courier New", size=9)
+        self.debug_text.configure(font=mono_font)
+
+        self.log_debug("调试面板初始化完成")
+
+    def clear_debug(self):
+        """清空调试信息"""
+        if hasattr(self, 'debug_text'):
+            self.debug_text.delete(1.0, tk.END)
+            self.log_debug("调试信息已清空")
+
+    def save_debug_log(self):
+        """保存调试日志到文件"""
+        try:
+            import datetime
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f'AGENTS/gui_debug_{timestamp}.log'
+
+            if hasattr(self, 'debug_text'):
+                content = self.debug_text.get(1.0, tk.END)
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(content)
+
+                messagebox.showinfo("成功", f"调试日志已保存到: {filename}")
+                self.log_debug(f"调试日志已保存到: {filename}")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存调试日志失败: {e}")
+            self.log_debug(f"保存调试日志失败: {e}")
+
     def refresh_status(self):
         """刷新防火墙状态"""
+        self.log_debug("开始刷新防火墙状态")
+
         def update():
+            self.log_debug("执行状态获取操作")
             status = self.ufw.get_status()
 
             if "error" in status:
-                self.status_label.config(text=f"错误：{status['error']}", foreground="red")
+                self.log_debug(f"状态获取失败: {status['error']}")
+                self.root.after(0, lambda: self.status_label.config(text=f"错误：{status['error']}", foreground="red"))
             else:
-                if status["active"]:
-                    self.status_label.config(text="状态：已启用", foreground="green")
-                    self.enable_btn.config(state="disabled")
-                    self.disable_btn.config(state="normal")
-                else:
-                    self.status_label.config(text="状态：已禁用", foreground="orange")
-                    self.enable_btn.config(state="normal")
-                    self.disable_btn.config(state="disabled")
+                self.log_debug(f"状态获取成功: active={status.get('active', False)}, logging={status.get('logging', False)}")
+                self.root.after(0, lambda: self._update_status_display(status))
 
-                logging_status = "已启用" if status["logging"] else "已禁用"
-                self.logging_label.config(text=f"日志：{logging_status}")
-
-            self.refresh_rules()
+            self.root.after(0, self.refresh_rules)
 
         threading.Thread(target=update, daemon=True).start()
+
+    def _update_status_display(self, status):
+        """更新状态显示"""
+        try:
+            if status.get("active", False):
+                self.status_label.config(text="状态：已启用", foreground="green")
+                self.enable_btn.config(state="disabled")
+                self.disable_btn.config(state="normal")
+                self.log_debug("状态显示更新为: 已启用")
+            else:
+                self.status_label.config(text="状态：已禁用", foreground="orange")
+                self.enable_btn.config(state="normal")
+                self.disable_btn.config(state="disabled")
+                self.log_debug("状态显示更新为: 已禁用")
+
+            logging_status = "已启用" if status.get("logging", False) else "已禁用"
+            self.logging_label.config(text=f"日志：{logging_status}")
+            self.log_debug(f"日志状态显示更新为: {logging_status}")
+        except Exception as e:
+            self.log_debug(f"状态显示更新失败: {e}")
 
     def enable_firewall(self):
         """启用防火墙"""

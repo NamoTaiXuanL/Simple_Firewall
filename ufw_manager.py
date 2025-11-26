@@ -4,17 +4,68 @@
 import subprocess
 import re
 import json
+import logging
+import datetime
 from typing import List, Dict, Tuple
 
 class UFWManager:
     """UFW防火墙管理器"""
 
-    def __init__(self):
-        pass
+    def __init__(self, debug=False):
+        self.debug = debug
+        self.setup_logging()
+
+    def setup_logging(self):
+        """设置调试日志"""
+        if self.debug:
+            # 创建日志记录器
+            self.logger = logging.getLogger('UFWManager')
+            self.logger.setLevel(logging.DEBUG)
+
+            # 创建文件处理器
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            log_file = f'AGENTS/ufw_debug_{timestamp}.log'
+
+            try:
+                file_handler = logging.FileHandler(log_file, encoding='utf-8')
+                file_handler.setLevel(logging.DEBUG)
+
+                # 创建格式化器
+                formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+                file_handler.setFormatter(formatter)
+
+                self.logger.addHandler(file_handler)
+                self.logger.info("UFW管理器调试日志启动")
+            except Exception as e:
+                print(f"无法创建日志文件: {e}")
+
+    def log_debug(self, message):
+        """记录调试信息"""
+        if self.debug and hasattr(self, 'logger'):
+            self.logger.debug(message)
+        elif self.debug:
+            print(f"[DEBUG] {message}")
+
+    def log_info(self, message):
+        """记录信息"""
+        if self.debug and hasattr(self, 'logger'):
+            self.logger.info(message)
+        elif self.debug:
+            print(f"[INFO] {message}")
+
+    def log_error(self, message):
+        """记录错误"""
+        if self.debug and hasattr(self, 'logger'):
+            self.logger.error(message)
+        elif self.debug:
+            print(f"[ERROR] {message}")
 
     def run_command(self, command: str) -> Tuple[bool, str]:
         """执行shell命令"""
+        self.log_debug(f"执行命令: {command}")
+
         try:
+            self.log_debug("开始执行subprocess...")
             result = subprocess.run(
                 command,
                 shell=True,
@@ -22,9 +73,35 @@ class UFWManager:
                 text=True,
                 timeout=10
             )
-            return result.returncode == 0, result.stdout.strip()
+
+            # 记录详细结果
+            self.log_debug(f"命令返回码: {result.returncode}")
+            self.log_debug(f"标准输出: {result.stdout}")
+            if result.stderr:
+                self.log_debug(f"标准错误: {result.stderr}")
+
+            success = result.returncode == 0
+            output = result.stdout.strip()
+
+            self.log_info(f"命令执行结果: {'成功' if success else '失败'}")
+            self.log_info(f"输出内容长度: {len(output)} 字符")
+
+            return success, output
+
+        except subprocess.TimeoutExpired:
+            error_msg = "命令执行超时"
+            self.log_error(error_msg)
+            return False, error_msg
+        except subprocess.CalledProcessError as e:
+            error_msg = f"命令执行失败: {e}"
+            self.log_error(error_msg)
+            self.log_error(f"返回码: {e.returncode}")
+            self.log_error(f"输出: {e.output}")
+            return False, error_msg
         except Exception as e:
-            return False, str(e)
+            error_msg = f"未知错误: {e}"
+            self.log_error(error_msg)
+            return False, error_msg
 
     def get_status(self) -> Dict[str, any]:
         """获取防火墙状态"""
