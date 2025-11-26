@@ -15,7 +15,7 @@ class FirewallGUI:
 
         # 设置窗口
         self.root.title("简易防火墙管理工具")
-        self.root.geometry("800x600")
+        self.root.geometry("800x600")  # 恢复正常窗口大小
         self.root.resizable(True, True)
 
         print("[GUI] 防火墙界面初始化")
@@ -67,8 +67,8 @@ class FirewallGUI:
         # 日志区域
         self.create_log_section(main_frame)
 
-        # 程序豁免区域
-        self.create_program_exemption_section(main_frame)
+        # 程序豁免按钮区域
+        self.create_program_button_section(main_frame)
 
     def create_status_section(self, parent):
         """创建状态显示区域"""
@@ -110,7 +110,7 @@ class FirewallGUI:
     def create_rules_section(self, parent):
         """创建规则管理区域"""
         rules_frame = ttk.LabelFrame(parent, text="规则管理", padding="10")
-        rules_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        rules_frame.pack(fill=tk.BOTH, expand=False, pady=(0, 10))  # 不扩展
 
         # 添加规则区域
         add_frame = ttk.Frame(rules_frame)
@@ -124,9 +124,9 @@ class FirewallGUI:
         ttk.Button(add_frame, text="添加", command=self.add_rule).pack(side=tk.LEFT)
 
         # 规则列表
-        self.rules_tree = ttk.Treeview(rules_frame, columns=("rule",), show="headings", height=8)
+        self.rules_tree = ttk.Treeview(rules_frame, columns=("rule",), show="headings", height=6)  # 减少高度
         self.rules_tree.heading("rule", text="规则")
-        self.rules_tree.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+        self.rules_tree.pack(fill=tk.BOTH, expand=False, pady=(0, 10))  # 不扩展
 
         # 规则操作按钮
         rules_btn_frame = ttk.Frame(rules_frame)
@@ -138,130 +138,26 @@ class FirewallGUI:
     def create_log_section(self, parent):
         """创建日志显示区域"""
         log_frame = ttk.LabelFrame(parent, text="防火墙日志", padding="10")
-        log_frame.pack(fill=tk.BOTH, expand=True)
+        log_frame.pack(fill=tk.BOTH, expand=True)  # 日志区域可以扩展
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=8, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
 
         ttk.Button(log_frame, text="刷新日志", command=self.refresh_logs).pack(anchor=tk.W)
 
-    def create_program_exemption_section(self, parent):
-        """创建程序豁免区域"""
+    def create_program_button_section(self, parent):
+        """创建程序豁免按钮区域"""
         program_frame = ttk.LabelFrame(parent, text="程序豁免管理", padding="10")
-        program_frame.pack(fill=tk.BOTH, expand=True)
+        program_frame.pack(fill=tk.X, pady=(10, 0))
 
-        # 控制按钮
-        btn_frame = ttk.Frame(program_frame)
-        btn_frame.pack(fill=tk.X, pady=(0, 10))
+        ttk.Button(program_frame, text="打开程序豁免管理器", command=self.open_program_exemption_window,
+                  width=25).pack()
 
-        ttk.Button(btn_frame, text="获取活动程序", command=self.load_programs).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(btn_frame, text="允许选中程序", command=self.allow_selected_programs).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(btn_frame, text="刷新", command=self.load_programs).pack(side=tk.LEFT)
+    def open_program_exemption_window(self):
+        """打开程序豁免管理窗口"""
+        ProgramExemptionWindow(self.root, self.ufw)
 
-        # 程序列表
-        columns = ('name', 'pid', 'port', 'protocol', 'address')
-        self.programs_tree = ttk.Treeview(program_frame, columns=columns, show='headings', height=10)
-
-        # 设置列标题
-        self.programs_tree.heading('name', text='程序名称')
-        self.programs_tree.heading('pid', text='PID')
-        self.programs_tree.heading('port', text='端口')
-        self.programs_tree.heading('protocol', text='协议')
-        self.programs_tree.heading('address', text='监听地址')
-
-        # 设置列宽
-        self.programs_tree.column('name', width=200)
-        self.programs_tree.column('pid', width=80)
-        self.programs_tree.column('port', width=80)
-        self.programs_tree.column('protocol', width=80)
-        self.programs_tree.column('address', width=200)
-
-        self.programs_tree.pack(fill=tk.BOTH, expand=True)
-
-        # 启用多选
-        self.programs_tree.configure(selectmode='extended')
-
-        # 初始加载
-        self.load_programs()
-
-    def load_programs(self):
-        """加载程序列表"""
-        print("[GUI] 开始加载程序列表")
-
-        def worker():
-            try:
-                print("[GUI] 正在获取活动程序...")
-                programs = self.ufw.get_all_listening_programs()
-
-                def update_ui():
-                    # 清空现有项目
-                    for item in self.programs_tree.get_children():
-                        self.programs_tree.delete(item)
-
-                    # 添加程序项目
-                    for prog in programs:
-                        self.programs_tree.insert("", "end", values=(
-                            prog['name'],
-                            prog['pid'],
-                            prog['port'],
-                            prog['protocol'],
-                            prog['address']
-                        ))
-
-                    print(f"[GUI] 已加载 {len(programs)} 个程序")
-
-                self.root.after(0, update_ui)
-
-            except Exception as e:
-                print(f"[GUI] 加载程序列表失败: {e}")
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def allow_selected_programs(self):
-        """允许选中的程序通过防火墙"""
-        selected = self.programs_tree.selection()
-        if not selected:
-            messagebox.showwarning("警告", "请选择要豁免的程序")
-            return
-
-        # 获取选中程序的端口信息
-        ports_to_allow = []
-        for item in selected:
-            values = self.programs_tree.item(item, 'values')
-            if len(values) >= 4:
-                program_name = values[0]
-                port = values[2]
-                protocol = values[3]
-                ports_to_allow.append((program_name, port, protocol))
-
-        def worker():
-            success_count = 0
-            total_count = len(ports_to_allow)
-
-            for program_name, port, protocol in ports_to_allow:
-                try:
-                    print(f"[GUI] 允许程序 {program_name} 端口 {port}/{protocol}")
-                    success, output = self.ufw.allow_program_by_port(port, protocol)
-                    if success:
-                        success_count += 1
-                    else:
-                        print(f"[GUI] 允许端口失败: {output}")
-                except Exception as e:
-                    print(f"[GUI] 允许程序端口异常: {e}")
-
-            def update_ui():
-                if success_count > 0:
-                    messagebox.showinfo("成功", f"已为 {success_count}/{total_count} 个程序添加防火墙豁免")
-                    print(f"[GUI] 成功为 {success_count}/{total_count} 个程序添加豁免")
-                    self.refresh_status()
-                    self.refresh_rules()
-                else:
-                    messagebox.showerror("失败", "添加防火墙豁免失败")
-
-            self.root.after(0, update_ui)
-
-        threading.Thread(target=worker, daemon=True).start()
-
+    
     def refresh_status(self):
         """刷新防火墙状态"""
         print("[GUI] 开始刷新防火墙状态")
@@ -449,6 +345,171 @@ class FirewallGUI:
             messagebox.showinfo("成功", f"{operation}成功")
         else:
             messagebox.showerror("错误", f"{operation}失败\n{output}")
+
+class ProgramExemptionWindow:
+    """程序豁免管理窗口"""
+
+    def __init__(self, parent, ufw_manager):
+        self.ufw = ufw_manager
+
+        # 创建新窗口
+        self.window = tk.Toplevel(parent)
+        self.window.title("程序豁免管理器")
+        self.window.geometry("900x600")
+        self.window.resizable(True, True)
+
+        print("[EXEMPTION] 打开程序豁免管理窗口")
+
+        self.create_widgets()
+        self.load_programs()
+
+        # 窗口关闭时的处理
+        self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        # 居中显示
+        self.center_window()
+
+    def center_window(self):
+        """居中显示窗口"""
+        self.window.update_idletasks()
+        x = (self.window.winfo_screenwidth() // 2) - (self.window.winfo_width() // 2)
+        y = (self.window.winfo_screenheight() // 2) - (self.window.winfo_height() // 2)
+        self.window.geometry(f"+{x}+{y}")
+
+    def create_widgets(self):
+        """创建界面组件"""
+        # 主容器
+        main_frame = ttk.Frame(self.window, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 控制按钮
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(btn_frame, text="获取活动程序", command=self.load_programs).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(btn_frame, text="允许选中程序", command=self.allow_selected_programs).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(btn_frame, text="刷新", command=self.load_programs).pack(side=tk.LEFT)
+
+        # 程序列表
+        columns = ('name', 'pid', 'port', 'protocol', 'address')
+        self.programs_tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=20)
+
+        # 设置列标题
+        self.programs_tree.heading('name', text='程序名称')
+        self.programs_tree.heading('pid', text='PID')
+        self.programs_tree.heading('port', text='端口')
+        self.programs_tree.heading('protocol', text='协议')
+        self.programs_tree.heading('address', text='监听地址')
+
+        # 设置列宽
+        self.programs_tree.column('name', width=200)
+        self.programs_tree.column('pid', width=80)
+        self.programs_tree.column('port', width=80)
+        self.programs_tree.column('protocol', width=80)
+        self.programs_tree.column('address', width=200)
+
+        self.programs_tree.pack(fill=tk.BOTH, expand=True)
+
+        # 启用多选
+        self.programs_tree.configure(selectmode='extended')
+
+        # 状态栏
+        status_frame = ttk.Frame(main_frame)
+        status_frame.pack(fill=tk.X, pady=(10, 0))
+
+        self.status_label = ttk.Label(status_frame, text="准备就绪")
+        self.status_label.pack(side=tk.LEFT)
+
+    def load_programs(self):
+        """加载程序列表"""
+        print("[EXEMPTION] 开始加载程序列表")
+        self.status_label.config(text="正在获取活动程序...")
+
+        def worker():
+            try:
+                print("[EXEMPTION] 正在获取活动程序...")
+                programs = self.ufw.get_all_listening_programs()
+
+                def update_ui():
+                    # 清空现有项目
+                    for item in self.programs_tree.get_children():
+                        self.programs_tree.delete(item)
+
+                    # 添加程序项目
+                    for prog in programs:
+                        self.programs_tree.insert("", "end", values=(
+                            prog['name'],
+                            prog['pid'],
+                            prog['port'],
+                            prog['protocol'],
+                            prog['address']
+                        ))
+
+                    print(f"[EXEMPTION] 已加载 {len(programs)} 个程序")
+                    self.status_label.config(text=f"已找到 {len(programs)} 个活动程序")
+
+                self.window.after(0, update_ui)
+
+            except Exception as e:
+                print(f"[EXEMPTION] 加载程序列表失败: {e}")
+                def update_error():
+                    self.status_label.config(text="加载程序列表失败")
+                self.window.after(0, update_error)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def allow_selected_programs(self):
+        """允许选中的程序通过防火墙"""
+        selected = self.programs_tree.selection()
+        if not selected:
+            messagebox.showwarning("警告", "请选择要豁免的程序")
+            return
+
+        # 获取选中程序的端口信息
+        ports_to_allow = []
+        for item in selected:
+            values = self.programs_tree.item(item, 'values')
+            if len(values) >= 4:
+                program_name = values[0]
+                port = values[2]
+                protocol = values[3]
+                ports_to_allow.append((program_name, port, protocol))
+
+        def worker():
+            success_count = 0
+            total_count = len(ports_to_allow)
+
+            self.window.after(0, lambda: self.status_label.config(text=f"正在处理 {total_count} 个程序..."))
+
+            for program_name, port, protocol in ports_to_allow:
+                try:
+                    print(f"[EXEMPTION] 允许程序 {program_name} 端口 {port}/{protocol}")
+                    success, output = self.ufw.allow_program_by_port(port, protocol)
+                    if success:
+                        success_count += 1
+                    else:
+                        print(f"[EXEMPTION] 允许端口失败: {output}")
+                except Exception as e:
+                    print(f"[EXEMPTION] 允许程序端口异常: {e}")
+
+            def update_ui():
+                if success_count > 0:
+                    messagebox.showinfo("成功", f"已为 {success_count}/{total_count} 个程序添加防火墙豁免")
+                    print(f"[EXEMPTION] 成功为 {success_count}/{total_count} 个程序添加豁免")
+                    self.status_label.config(text=f"成功为 {success_count}/{total_count} 个程序添加豁免")
+                else:
+                    messagebox.showerror("失败", "添加防火墙豁免失败")
+                    self.status_label.config(text="添加防火墙豁免失败")
+
+            self.window.after(0, update_ui)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_closing(self):
+        """窗口关闭处理"""
+        print("[EXEMPTION] 关闭程序豁免管理窗口")
+        self.window.destroy()
+
 
 class PasswordDialog:
     """密码输入对话框"""
