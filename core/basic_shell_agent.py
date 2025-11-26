@@ -13,6 +13,7 @@ import re
 import requests
 import sys
 import os
+import time
 from typing import Dict, List, Tuple, Optional
 from conversation_manager import ConversationManager
 from context_manager import ContextManager
@@ -127,25 +128,91 @@ ls -la
 现在开始执行系统网络安全检查任务。"""
 
     def _call_deepseek_api(self, messages: List[Dict]) -> str:
-        """调用DeepSeek API"""
+        """调用DeepSeek API，带重试机制"""
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
-        
+
         data = {
             "model": "deepseek-chat",
             "messages": messages,
             "max_tokens": 4000,
             "temperature": 0.3
         }
-        
-        try:
-            response = requests.post(self.api_url, headers=headers, json=data, timeout=30)
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-        except Exception as e:
-            return f"API调用错误: {str(e)}"
+
+        max_retries = 3
+        retry_delays = [5, 10, 15]  # 重试延迟（秒）
+
+        for attempt in range(max_retries + 1):  # 包括初始尝试
+            try:
+                if attempt > 0:
+                    print(f"正在进行第 {attempt} 次重试...（等待 {retry_delays[attempt-1]} 秒）")
+                    time.sleep(retry_delays[attempt-1])
+
+                # 增加超时时间
+                response = requests.post(
+                    self.api_url,
+                    headers=headers,
+                    json=data,
+                    timeout=60,  # 增加到60秒
+                    verify=True  # 确保SSL验证
+                )
+                response.raise_for_status()
+
+                result = response.json()["choices"][0]["message"]["content"]
+
+                if attempt > 0:
+                    print(f"第 {attempt} 次重试成功！")
+
+                return result
+
+            except requests.exceptions.Timeout as e:
+                error_msg = f"API调用超时: {str(e)}"
+                if attempt < max_retries:
+                    print(f"警告: {error_msg}")
+                    continue
+                else:
+                    print(f"错误: 所有重试均失败: {error_msg}")
+                    return f"API调用错误: {error_msg}"
+
+            except requests.exceptions.ConnectionError as e:
+                error_msg = f"网络连接错误: {str(e)}"
+                if attempt < max_retries:
+                    print(f"警告: {error_msg}")
+                    continue
+                else:
+                    print(f"错误: 所有重试均失败: {error_msg}")
+                    return f"API调用错误: {error_msg}"
+
+            except requests.exceptions.HTTPError as e:
+                error_msg = f"HTTP错误: {e.response.status_code} - {str(e)}"
+                if attempt < max_retries and e.response.status_code >= 500:
+                    # 服务器错误可以重试
+                    print(f"警告: {error_msg}")
+                    continue
+                else:
+                    print(f"错误: HTTP错误，无法重试: {error_msg}")
+                    return f"API调用错误: {error_msg}"
+
+            except requests.exceptions.RequestException as e:
+                error_msg = f"请求异常: {str(e)}"
+                if attempt < max_retries:
+                    print(f"警告: {error_msg}")
+                    continue
+                else:
+                    print(f"错误: 所有重试均失败: {error_msg}")
+                    return f"API调用错误: {error_msg}"
+
+            except (KeyError, ValueError, json.JSONDecodeError) as e:
+                error_msg = f"响应解析错误: {str(e)}"
+                print(f"错误: 响应格式错误: {error_msg}")
+                return f"API调用错误: {error_msg}"
+
+            except Exception as e:
+                error_msg = f"未知错误: {str(e)}"
+                print(f"错误: 未知错误: {error_msg}")
+                return f"API调用错误: {error_msg}"
 
     def _execute_linux_command(self, command: str) -> Tuple[str, int]:
         """在Linux中执行命令"""
@@ -272,7 +339,7 @@ ls -la
             save_record=True
         )
         
-        max_iterations = 999  # 防止无限循环
+        max_iterations = 30  # 防止无限循环
         iteration = 0
         
         while iteration < max_iterations:
