@@ -35,7 +35,7 @@ class BasicShellAgent:
         
     def _build_system_prompt(self) -> str:
         """构建系统提示词"""
-        return """你是一个系统网络安全代理（System Network Security Agent），专门负责防火墙配置和系统网络安全管理。
+        return """你是一个系统代理（System Agent），专门linux系统维护。
         
 1. 思考用户给出的问题
 2. 制定可操作的任务步骤
@@ -77,6 +77,7 @@ ls -la
 
 等待命令执行结果后，再进行下一步思考。
 
+-------------------------------------------------------
 
 你的核心任务是：
 
