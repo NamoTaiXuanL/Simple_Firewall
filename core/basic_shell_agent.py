@@ -17,6 +17,7 @@ import time
 from typing import Dict, List, Tuple, Optional
 from conversation_manager import ConversationManager
 from context_manager import ContextManager
+from shell_interface import get_shell_interface
 
 class BasicShellAgent:
     """基础Shell代理 - 实现思考-执行-观察循环"""
@@ -32,6 +33,9 @@ class BasicShellAgent:
         self.conversation_manager = ConversationManager()
         self.context_manager = ContextManager(self.conversation_manager, self.context_limit)
         self.context_manager.set_system_prompt(self.system_prompt)
+
+        # 初始化Shell接口
+        self.shell_interface = get_shell_interface(show_terminal=True)
         
     def _build_system_prompt(self) -> str:
         """构建系统提示词"""
@@ -216,24 +220,13 @@ ls -la
                 return f"API调用错误: {error_msg}"
 
     def _execute_linux_command(self, command: str) -> Tuple[str, int]:
-        """在Linux中执行命令"""
+        """使用Shell接口执行命令"""
         try:
-            # 确保在Linux用户主目录中执行命令
-            # 使用bash -c确保能正确处理复杂命令
-            result = subprocess.run(
-                ['bash', '-c', f'cd ~ && {command}'],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                encoding='utf-8',
-                errors='ignore'
-            )
-            output = result.stdout + result.stderr
-            return output.strip(), result.returncode
-        except subprocess.TimeoutExpired:
-            return "命令执行超时", 1
+            # 使用Shell接口执行命令，在终端中显示
+            output, return_code = self.shell_interface.execute_command(command)
+            return output, return_code
         except Exception as e:
-            return f"执行错误: {str(e)}", 1
+            return f"Shell接口执行错误: {str(e)}", 1
 
     def _parse_agent_response(self, response: str) -> Dict[str, List[str]]:
         """解析Agent响应，提取不同类型的内容"""
