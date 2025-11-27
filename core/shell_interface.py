@@ -20,6 +20,8 @@ class ShellInterface:
     def __init__(self, show_terminal: bool = True):
         self.show_terminal = show_terminal
         self.active_terminals = {}  # 跟踪活跃的终端进程
+        self.shared_terminal = None  # 共享终端实例
+        self.shared_terminal_process = None  # 共享终端进程
 
     def _has_graphical_environment(self) -> bool:
         """检查是否有图形界面环境"""
@@ -51,7 +53,7 @@ class ShellInterface:
             Tuple[str, int]: (输出内容, 返回码)
         """
         if self.show_terminal and self._has_graphical_environment():
-            return self._execute_in_terminal(command, wait_for_completion)
+            return self._execute_in_shared_terminal(command, wait_for_completion)
         else:
             return self._execute_background(command)
 
@@ -118,6 +120,50 @@ class ShellInterface:
 
         except Exception as e:
             return f"终端执行错误: {str(e)}", 1
+
+    def _execute_in_shared_terminal(self, command: str, wait_for_completion: bool) -> Tuple[str, int]:
+        """在共享终端中执行命令"""
+        try:
+            # 检查是否使用单个持久终端
+            if not hasattr(self, '_persistent_terminal_created'):
+                # 只在第一次执行时创建终端
+                terminal_exec = self._find_terminal_executable()
+                if not terminal_exec:
+                    return self._execute_background(command)
+
+                terminal_title = "Shell Agent - 命令执行终端"
+
+                if terminal_exec == 'gnome-terminal':
+                    # gnome-terminal: 执行命令后保持终端打开
+                    terminal_cmd = [
+                        'gnome-terminal',
+                        '--title', terminal_title,
+                        '--', 'bash', '-c', f'echo "Shell Agent 终端已启动"; echo "等待命令执行..."; exec bash'
+                    ]
+                elif terminal_exec == 'konsole':
+                    # konsole: 执行命令后保持终端打开
+                    terminal_cmd = [
+                        'konsole',
+                        '--title', terminal_title,
+                        '-e', 'bash', '-c', f'echo "Shell Agent 终端已启动"; echo "等待命令执行..."; exec bash'
+                    ]
+                else:  # xterm 或其他
+                    terminal_cmd = [
+                        terminal_exec,
+                        '-title', terminal_title,
+                        '-e', 'bash', '-c', f'echo "Shell Agent 终端已启动"; echo "等待命令执行..."; exec bash'
+                    ]
+
+                # 启动共享终端（不等待）
+                subprocess.Popen(terminal_cmd)
+                self._persistent_terminal_created = True
+                time.sleep(2)  # 给终端时间启动
+
+            # 实际执行命令并返回结果（不在新终端中，但终端已显示）
+            return self._execute_background(command)
+
+        except Exception as e:
+            return f"共享终端执行错误: {str(e)}", 1
 
     def _execute_background(self, command: str) -> Tuple[str, int]:
         """在后台执行命令"""
@@ -187,6 +233,14 @@ class ShellInterface:
         # 终止所有活跃终端
         for pid in list(self.active_terminals.keys()):
             self.kill_terminal(pid)
+
+        # 清理共享终端
+        if hasattr(self, 'shared_terminal_process') and self.shared_terminal_process:
+            try:
+                self.shared_terminal_process.terminate()
+                self.shared_terminal_process = None
+            except:
+                pass
 
     def set_terminal_mode(self, show_terminal: bool):
         """设置是否显示终端"""
