@@ -125,42 +125,97 @@ class ShellInterface:
         """在共享终端中执行命令"""
         try:
             # 检查是否使用单个持久终端
-            if not hasattr(self, '_persistent_terminal_created'):
-                # 只在第一次执行时创建终端
+            if not hasattr(self, '_persistent_terminal_created') or not self.shared_terminal_process:
                 terminal_exec = self._find_terminal_executable()
                 if not terminal_exec:
                     return self._execute_background(command)
 
+                # 创建命令管道目录
+                self.command_dir = f"/tmp/shell_agent_commands_{os.getpid()}"
+                os.makedirs(self.command_dir, exist_ok=True)
+
+                # 创建命令脚本
+                command_script = os.path.join(self.command_dir, "command_script.sh")
+                with open(command_script, 'w') as f:
+                    f.write('''#!/bin/bash
+# Shell Agent 命令执行脚本
+echo "Shell Agent 终端已启动"
+echo "等待命令执行..."
+
+# 监听命令文件
+while true; do
+    if [ -f "/tmp/shell_agent_commands_{pid}/current_command" ]; then
+        echo ""
+        echo "=================="
+        echo "执行命令: $(cat /tmp/shell_agent_commands_{pid}/current_command)"
+        echo "=================="
+
+        # 执行命令
+        bash "/tmp/shell_agent_commands_{pid}/current_command"
+        echo "命令执行完成"
+        echo ""
+
+        # 清理命令文件
+        rm -f "/tmp/shell_agent_commands_{pid}/current_command"
+    fi
+    sleep 0.5
+done
+'''.format(pid=os.getpid()))
+
+                os.chmod(command_script, 0o755)
+
                 terminal_title = "Shell Agent - 命令执行终端"
 
                 if terminal_exec == 'gnome-terminal':
-                    # gnome-terminal: 执行命令后保持终端打开
                     terminal_cmd = [
                         'gnome-terminal',
                         '--title', terminal_title,
-                        '--', 'bash', '-c', f'echo "Shell Agent 终端已启动"; echo "等待命令执行..."; exec bash'
+                        '--', 'bash', command_script
                     ]
                 elif terminal_exec == 'konsole':
-                    # konsole: 执行命令后保持终端打开
                     terminal_cmd = [
                         'konsole',
                         '--title', terminal_title,
-                        '-e', 'bash', '-c', f'echo "Shell Agent 终端已启动"; echo "等待命令执行..."; exec bash'
+                        '-e', 'bash', command_script
                     ]
                 else:  # xterm 或其他
                     terminal_cmd = [
                         terminal_exec,
                         '-title', terminal_title,
-                        '-e', 'bash', '-c', f'echo "Shell Agent 终端已启动"; echo "等待命令执行..."; exec bash'
+                        '-e', 'bash', command_script
                     ]
 
-                # 启动共享终端（不等待）
-                subprocess.Popen(terminal_cmd)
+                # 启动共享终端
+                self.shared_terminal_process = subprocess.Popen(terminal_cmd)
                 self._persistent_terminal_created = True
                 time.sleep(2)  # 给终端时间启动
 
-            # 实际执行命令并返回结果（不在新终端中，但终端已显示）
-            return self._execute_background(command)
+            # 创建当前命令文件
+            current_command_file = os.path.join(self.command_dir, "current_command")
+            with open(current_command_file, 'w') as f:
+                f.write(f'cd ~ && {command}')
+
+            # 等待命令执行完成（通过检查文件是否存在）
+            if wait_for_completion:
+                max_wait = 300  # 最多等待5分钟
+                wait_time = 0
+                while os.path.exists(current_command_file) and wait_time < max_wait:
+                    time.sleep(1)
+                    wait_time += 1
+
+                if wait_time >= max_wait:
+                    # 超时，清理命令文件
+                    try:
+                        os.unlink(current_command_file)
+                    except:
+                        pass
+                    return "命令执行超时", 1
+
+                # 在后台执行同样的命令来获取结果
+                return self._execute_background(command)
+            else:
+                # 不等待完成，直接返回
+                return f"命令已发送到终端执行: {command}", 0
 
         except Exception as e:
             return f"共享终端执行错误: {str(e)}", 1
@@ -239,6 +294,14 @@ class ShellInterface:
             try:
                 self.shared_terminal_process.terminate()
                 self.shared_terminal_process = None
+            except:
+                pass
+
+        # 清理命令目录
+        if hasattr(self, 'command_dir'):
+            try:
+                import shutil
+                shutil.rmtree(self.command_dir, ignore_errors=True)
             except:
                 pass
 
