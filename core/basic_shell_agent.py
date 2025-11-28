@@ -21,6 +21,7 @@ from shell_interface import get_shell_interface
 from exec_manager import ExecManager
 from api_manager import ApiManager
 from Additional_prompts.additional_prompt_manager import AdditionalPromptManager
+from system_commands_manager import SystemCommandsManager
 
 class BasicShellAgent:
     """基础Shell代理 - 实现思考-执行-观察循环"""
@@ -55,6 +56,9 @@ class BasicShellAgent:
 
         # 初始化附加提示词管理器
         self.additional_prompt_manager = AdditionalPromptManager()
+
+        # 初始化系统命令管理器
+        self.system_commands_manager = SystemCommandsManager(self)
         
     def _build_system_prompt(self) -> str:
         """构建系统提示词"""
@@ -104,6 +108,7 @@ class BasicShellAgent:
 - 避免急于求成：复杂任务应分解为多个回合，每个回合专注解决一类问题。
 - 鼓励分步推进：推进关键步骤之前,先进行信息采集。
 - 收集到充分的信息以后,果断进行操作,快速决断,快速反应。
+- 最小原则，一
 - 遇到专业领域请附加专业提示词
 
 
@@ -361,18 +366,28 @@ def main():
     print("Basic Shell Agent")
     print("专注于Linux环境的思考-执行-观察循环")
     print("-" * 40)
-    
+    print("系统命令:")
+    print("  /new  - 创建新的对话会话，清空之前的上下文")
+    print("-" * 40)
+
     agent = BasicShellAgent()
     
     while True:
         try:
-            user_input = input("\n请输入任务 (输入 'quit' 退出): ").strip()
+            user_input = input("\n请输入任务 (输入 'quit' 退出, '/new' 新建对话): ").strip()
             if user_input.lower() in ['quit', 'exit', '退出']:
                 print("再见!")
                 break
-            
+
             if user_input:
-                agent.run_task(user_input)
+                # 检查是否为系统命令
+                if agent.system_commands_manager.is_system_command(user_input):
+                    is_system_cmd, result_msg, should_continue = agent.system_commands_manager.execute_system_command(user_input)
+                    print(f"\n系统命令: {result_msg}")
+                    if not should_continue:
+                        continue
+                else:
+                    agent.run_task(user_input)
             
         except KeyboardInterrupt:
             print("\n\n程序被用户中断")
