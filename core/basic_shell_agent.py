@@ -37,6 +37,13 @@ class BasicShellAgent:
         self.context_manager = ContextManager(self.conversation_manager, self.context_limit)
         self.context_manager.set_system_prompt(self.system_prompt)
 
+        # 保存系统提示词到对话记录中，方便调试检查
+        self.conversation_manager.add_conversation_entry(
+            role="system",
+            content=f"【系统提示词】\n{self.system_prompt}\n【系统提示词结束】",
+            metadata={"type": "system_prompt", "length": len(self.system_prompt)}
+        )
+
         # 初始化Shell接口
         self.shell_interface = get_shell_interface(show_terminal=True)
 
@@ -97,7 +104,7 @@ class BasicShellAgent:
 - 避免急于求成：复杂任务应分解为多个回合，每个回合专注解决一类问题。
 - 鼓励分步推进：推进关键步骤之前,先进行信息采集。
 - 收集到充分的信息以后,果断进行操作,快速决断,快速反应。
-
+- 遇到专业领域请附加专业提示词
 
 
 **示例格式：**
@@ -111,13 +118,33 @@ ls -la
 
 等待命令执行结果后，再进行下一步思考。
 
-**附加提示词**
-遇到对应领域的任务 需要添加不同领域的提示词
-请输入  Additional prompts  
+**附加提示词功能（重要）**
+当你遇到特定领域的专业任务时，可以使用附加提示词获得专业的知识和指导。
+
+**使用方式：**
+当你需要某方面的专业能力时，输入以下命令：
+[EXEC] Additional prompts <提示词名称> [/EXEC]
+
+**可用的专业领域提示词：**
+- **System-security**: 系统网络安全分析，包括防火墙管理、端口扫描、安全配置等
+- 更多个性化提示词可按需添加
+
+**使用示例：**
+如果你需要进行系统安全检查，可以输入：
 [EXEC] Additional prompts System-security [/EXEC]
+系统会立即注入系统安全专业知识
 
--------------------------------------------------------
+**使用时机：**
+- 发现任务涉及网络安全
+- 需要进行系统安全分析
+- 要配置安全相关的设置
+- 遇到安全相关的技术问题
 
+**优势：**
+- 获得特定领域的专业知识
+- 增强在特定领域的问题解决能力
+
+**注意：** 附加提示词是一次性注入，会在当前会话中持续生效。合理使用此功能可以显著提升你在专业领域的表现。
 
 现在开始执行任务。"""
 
