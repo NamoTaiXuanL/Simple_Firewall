@@ -18,6 +18,8 @@ from typing import Dict, List, Tuple, Optional
 from conversation_manager import ConversationManager
 from context_manager import ContextManager
 from shell_interface import get_shell_interface
+from exec_manager import ExecManager
+from api_manager import ApiManager
 
 class BasicShellAgent:
     """基础Shell代理 - 实现思考-执行-观察循环"""
@@ -36,6 +38,12 @@ class BasicShellAgent:
 
         # 初始化Shell接口
         self.shell_interface = get_shell_interface(show_terminal=True)
+
+        # 初始化EXEC管理器
+        self.exec_manager = ExecManager(self.shell_interface)
+
+        # 初始化API管理器
+        self.api_manager = ApiManager(self.api_key, self.api_url)
         
     def _build_system_prompt(self) -> str:
         """构建系统提示词"""
@@ -99,6 +107,11 @@ ls -la
 
 等待命令执行结果后，再进行下一步思考。
 
+**附加提示词**
+遇到对应领域的任务 需要添加不同领域的提示词
+请输入  Additional prompts  
+[EXEC] Additional prompts System security [/EXEC]
+
 -------------------------------------------------------
 
 你的核心任务是：
@@ -150,102 +163,7 @@ ls -la
 
 现在开始执行系统网络安全检查任务。"""
 
-    def _call_deepseek_api(self, messages: List[Dict]) -> str:
-        """调用DeepSeek API，带重试机制"""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
-        data = {
-            "model": "deepseek-chat",
-            "messages": messages,
-            "max_tokens": 4000,
-            "temperature": 0.3
-        }
-
-        max_retries = 3
-        retry_delays = [5, 10, 15]  # 重试延迟（秒）
-
-        for attempt in range(max_retries + 1):  # 包括初始尝试
-            try:
-                if attempt > 0:
-                    print(f"正在进行第 {attempt} 次重试...（等待 {retry_delays[attempt-1]} 秒）")
-                    time.sleep(retry_delays[attempt-1])
-
-                # 增加超时时间
-                response = requests.post(
-                    self.api_url,
-                    headers=headers,
-                    json=data,
-                    timeout=60,  # 增加到60秒
-                    verify=True  # 确保SSL验证
-                )
-                response.raise_for_status()
-
-                result = response.json()["choices"][0]["message"]["content"]
-
-                if attempt > 0:
-                    print(f"第 {attempt} 次重试成功！")
-
-                return result
-
-            except requests.exceptions.Timeout as e:
-                error_msg = f"API调用超时: {str(e)}"
-                if attempt < max_retries:
-                    print(f"警告: {error_msg}")
-                    continue
-                else:
-                    print(f"错误: 所有重试均失败: {error_msg}")
-                    return f"API调用错误: {error_msg}"
-
-            except requests.exceptions.ConnectionError as e:
-                error_msg = f"网络连接错误: {str(e)}"
-                if attempt < max_retries:
-                    print(f"警告: {error_msg}")
-                    continue
-                else:
-                    print(f"错误: 所有重试均失败: {error_msg}")
-                    return f"API调用错误: {error_msg}"
-
-            except requests.exceptions.HTTPError as e:
-                error_msg = f"HTTP错误: {e.response.status_code} - {str(e)}"
-                if attempt < max_retries and e.response.status_code >= 500:
-                    # 服务器错误可以重试
-                    print(f"警告: {error_msg}")
-                    continue
-                else:
-                    print(f"错误: HTTP错误，无法重试: {error_msg}")
-                    return f"API调用错误: {error_msg}"
-
-            except requests.exceptions.RequestException as e:
-                error_msg = f"请求异常: {str(e)}"
-                if attempt < max_retries:
-                    print(f"警告: {error_msg}")
-                    continue
-                else:
-                    print(f"错误: 所有重试均失败: {error_msg}")
-                    return f"API调用错误: {error_msg}"
-
-            except (KeyError, ValueError, json.JSONDecodeError) as e:
-                error_msg = f"响应解析错误: {str(e)}"
-                print(f"错误: 响应格式错误: {error_msg}")
-                return f"API调用错误: {error_msg}"
-
-            except Exception as e:
-                error_msg = f"未知错误: {str(e)}"
-                print(f"错误: 未知错误: {error_msg}")
-                return f"API调用错误: {error_msg}"
-
-    def _execute_linux_command(self, command: str) -> Tuple[str, int]:
-        """使用Shell接口执行命令"""
-        try:
-            # 使用Shell接口执行命令，在终端中显示
-            output, return_code = self.shell_interface.execute_command(command)
-            return output, return_code
-        except Exception as e:
-            return f"Shell接口执行错误: {str(e)}", 1
-
+      
     def _parse_agent_response(self, response: str) -> Dict[str, List[str]]:
         """解析Agent响应，提取不同类型的内容"""
         parsed = {
@@ -254,23 +172,22 @@ ls -la
             "observe": [],
             "result": []
         }
-        
+
         # 提取THINK内容
         think_pattern = r'\[THINK\](.*?)\[/THINK\]'
         parsed["think"] = re.findall(think_pattern, response, re.DOTALL)
-        
-        # 提取EXEC内容
-        exec_pattern = r'\[EXEC\](.*?)\[/EXEC\]'
-        parsed["exec"] = re.findall(exec_pattern, response, re.DOTALL)
-        
+
+        # 使用EXEC管理器提取EXEC内容
+        parsed["exec"] = self.exec_manager.parse_exec_commands(response)
+
         # 提取OBSERVE内容
         observe_pattern = r'\[OBSERVE\](.*?)\[/OBSERVE\]'
         parsed["observe"] = re.findall(observe_pattern, response, re.DOTALL)
-        
+
         # 提取RESULT内容
         result_pattern = r'\[RESULT\](.*?)\[/RESULT\]'
         parsed["result"] = re.findall(result_pattern, response, re.DOTALL)
-        
+
         return parsed
 
     def _format_output(self, content: str, tag_type: str) -> None:
@@ -362,7 +279,7 @@ ls -la
             messages = self.context_manager.truncate_context_if_needed(messages)
 
             # 获取AI响应
-            ai_response = self._call_deepseek_api(messages)
+            ai_response = self.api_manager.call_deepseek_api(messages)
             if "API调用错误" in ai_response:
                 self._format_output(ai_response, "error")
                 # 保存错误到对话记录
@@ -393,13 +310,12 @@ ls -la
                 command = exec_cmd.strip()
                 if command:
                     self._format_output(f"执行命令: {command}", "exec")
-                    output, return_code = self._execute_linux_command(command)
 
-                    # 显示命令输出
-                    if output:
-                        print(f"命令输出:\n{output}")
-                    else:
-                        print("命令无输出")
+                    # 使用EXEC管理器执行命令
+                    output, return_code, output_info = self.exec_manager.execute_command_and_get_output(command)
+
+                    # 显示命令输出信息
+                    print(output_info)
                     print(f"返回码: {return_code}")
 
                     # 将执行结果添加到上下文和对话记录
