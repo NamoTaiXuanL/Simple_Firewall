@@ -355,7 +355,7 @@ class NetworkMonitorGUI:
 
         # 创建Treeview
         columns = ('PID', '进程名称', '协议', 'IP地址', '端口', '状态')
-        self.listening_tree = ttk.Treeview(listing_frame, columns=columns, show='headings', height=20)
+        self.listening_tree = ttk.Treeview(listening_frame, columns=columns, show='headings', height=20)
 
         # 设置列标题和宽度
         column_widths = {'PID': 80, '进程名称': 200, '协议': 80, 'IP地址': 150, '端口': 80, '状态': 100}
@@ -604,12 +604,23 @@ class NetworkMonitorGUI:
 
     def run(self):
         """运行GUI"""
+        print("[GUI] 开始初始化图形界面...")
+
         # 初始数据
+        print("[GUI] 正在加载初始数据...")
         self.refresh_all_data()
 
+        # 确保窗口显示
+        print("[GUI] 正在显示窗口...")
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
         # 启动自动刷新
+        print("[GUI] 启动自动刷新...")
         self.auto_refresh()
 
+        print("[GUI] 进入主循环...")
         # 运行主循环
         self.root.mainloop()
 
@@ -618,9 +629,12 @@ def main():
     """主函数"""
     import sys
 
+    print(f"[MAIN] 启动参数: {sys.argv}")
+
     # 检查命令行参数
     if len(sys.argv) > 1 and sys.argv[1] == '--cli':
         # 命令行模式
+        print("[MAIN] 启动命令行模式")
         mode = 'listening'  # 默认显示监听端口
         if len(sys.argv) > 2:
             mode = sys.argv[2]
@@ -629,12 +643,17 @@ def main():
         monitor.run_cli(mode)
     else:
         # GUI模式（默认）
+        print("[MAIN] 启动GUI模式")
         try:
+            print("[MAIN] 正在创建GUI实例...")
             app = NetworkMonitorGUI()
+            print("[MAIN] GUI实例创建成功，开始运行...")
             app.run()
         except Exception as e:
-            print(f"启动GUI时出错: {e}")
-            print("切换到命令行模式...")
+            print(f"[ERROR] 启动GUI时出错: {e}")
+            import traceback
+            traceback.print_exc()
+            print("[MAIN] 切换到命令行模式...")
             monitor = NetworkMonitor()
             monitor.run_cli()
 
