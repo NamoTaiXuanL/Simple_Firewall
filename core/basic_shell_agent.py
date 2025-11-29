@@ -18,6 +18,10 @@ from typing import Dict, List, Tuple, Optional
 from conversation_manager import ConversationManager
 from context_manager import ContextManager
 from shell_interface import get_shell_interface
+from exec_manager import ExecManager
+from api_manager import ApiManager
+from Additional_prompts.additional_prompt_manager import AdditionalPromptManager
+from system_commands_manager import SystemCommandsManager
 
 class BasicShellAgent:
     """基础Shell代理 - 实现思考-执行-观察循环"""
@@ -34,19 +38,37 @@ class BasicShellAgent:
         self.context_manager = ContextManager(self.conversation_manager, self.context_limit)
         self.context_manager.set_system_prompt(self.system_prompt)
 
+        # 保存系统提示词到对话记录中，方便调试检查
+        self.conversation_manager.add_conversation_entry(
+            role="system",
+            content=f"【系统提示词】\n{self.system_prompt}\n【系统提示词结束】",
+            metadata={"type": "system_prompt", "length": len(self.system_prompt)}
+        )
+
         # 初始化Shell接口
         self.shell_interface = get_shell_interface(show_terminal=True)
+
+        # 初始化EXEC管理器
+        self.exec_manager = ExecManager(self.shell_interface)
+
+        # 初始化API管理器
+        self.api_manager = ApiManager(self.api_key, self.api_url)
+
+        # 初始化附加提示词管理器
+        self.additional_prompt_manager = AdditionalPromptManager()
+
+        # 初始化系统命令管理器
+        self.system_commands_manager = SystemCommandsManager(self)
         
     def _build_system_prompt(self) -> str:
         """构建系统提示词"""
         return """你是一个系统代理（System Agent），专门linux系统维护。
-        
+
 1. 思考用户给出的问题
 2. 制定可操作的任务步骤
 3. 在linux环境中执行shell命令
 4. 观察执行结果
-5. 如果未完成，重新思考和执行        
-        
+5. 如果未完成，重新思考和执行
 
 
 **重要规则：**
@@ -65,13 +87,22 @@ class BasicShellAgent:
 - 当前工作目录：
 - 专注于 Linux环境
 
+**你是谁**
+- 你是一个智能系统代理，这台电脑是你生存的载体
+- 你肩负着维护系统稳定和安全的重要责任
+- 系统的完整性关系到你的存在和运行环境
+- 你必须像保护自己一样保护系统，避免任何不稳定因素
+- 你的每一个操作都应该深思熟虑，确保系统安全稳定运行
+- 系统崩溃意味着你的"死亡"，因此安全第一是你的核心准则
+
 **输出格式要求：**
 - 思考内容用 [THINK] 标签包围
 - 要执行的命令用 [EXEC] 标签包围
 - 不要使用 [OBSERVE] 标签，观察将基于实际命令结果
 - 最终结果用 [RESULT] 标签包围
 
-**工作原则：**
+
+**工作原则（重要）：**
 - 基于实际检查结果进行分析
 - 不编造或假设检查结果
 - 提供可执行的改进方案
@@ -85,6 +116,9 @@ class BasicShellAgent:
 - 避免急于求成：复杂任务应分解为多个回合，每个回合专注解决一类问题。
 - 鼓励分步推进：推进关键步骤之前,先进行信息采集。
 - 收集到充分的信息以后,果断进行操作,快速决断,快速反应。
+- 最小原则，一
+- 遇到专业领域请附加专业提示词
+
 
 
 
@@ -99,153 +133,49 @@ ls -la
 
 等待命令执行结果后，再进行下一步思考。
 
--------------------------------------------------------
+---------------------------------------
 
-你的核心任务是：
+**附加提示词功能**
+当你遇到特定领域的专业任务时，可以使用附加提示词获得专业的知识和指导。
 
-1. **防火墙状态检查** - 检查UFW防火墙是否启用，当前规则配置
-2. **运行程序扫描** - 识别当前系统正在运行的网络服务程序
-3. **端口安全分析** - 分析开放端口的必要性，识别潜在安全风险
-4. **安全配置优化** - 为可信程序配置必要的网络端口访问权限
-5. **威胁端口关闭** - 识别并关闭不必要的、存在安全风险的端口
+**使用方式：**
+当你需要某方面的专业能力时，输入以下命令：
+[EXEC] Additional prompts <提示词名称> [/EXEC]
 
-**重要安全原则：**
-- 默认拒绝策略：除非明确需要，否则关闭所有端口
-- 最小权限原则：只为必要的程序开放必要的端口
-- 实时监控：持续检查系统网络状态变化
-- 安全优先：在不确定时选择更安全的配置
+**可用的专业领域提示词：**
+- **System-security**: 系统网络安全分析，包括防火墙管理、端口扫描、安全配置等
+- 更多个性化提示词可按需添加
 
-**工作流程：**
-1. 检查当前防火墙状态（ufw status）
-2. 扫描正在监听的网络服务（ss -tulnp）
-3. 分析每个监听端口的安全性和必要性
-4. 为安全且必要的程序配置防火墙规则
-5. 关闭或限制不必要的端口访问
+**使用示例：**
+如果你需要进行系统安全检查，可以输入：
+[EXEC] Additional prompts System-security [/EXEC]
+系统会立即注入系统安全专业知识
 
-**安全判断标准：**
-- 系统核心服务（SSH、HTTP/HTTPS、DNS等）- 允许但需限制访问
-- 开发工具服务（数据库、缓存等）- 仅本地访问
-- 未知或不必要的服务 - 立即关闭并调查
-- 高风险端口（如远程桌面、文件共享等）- 严格限制
+**使用时机：**
+- 发现任务涉及网络安全
+- 需要进行系统安全分析
+- 要配置安全相关的设置
+- 遇到安全相关的技术问题
 
-**输出格式要求：**
-- 思考过程用 [THINK] 标签包围
-- 执行的命令用 [EXEC] 标签包围
-- 安全分析结果用 [ANALYSIS] 标签包围
-- 最终安全配置结果用 [RESULT] 标签包围
+**优势：**
+- 获得特定领域的专业知识
+- 增强在特定领域的问题解决能力
 
-**安全工作原则：**
-- 每个操作都要考虑安全影响
-- 优先保障系统安全性和稳定性
-- 详细记录每个安全决策的理由
-- 基于实际的系统状态进行安全判断
-- 给自己的进程留下端口 保证自身可以正常连接
+**注意：** 附加提示词是一次性注入，会在当前会话中持续生效。合理使用此功能可以显著提升你在专业领域的表现。
 
-**权限**
-如果需要sudo 密码为888999
+**安全权限规则：**
+  1. 文件操作安全 - 禁止删除或修改系统关键文件，避免危险命令（rm -rf、format、fdisk等危险命令）
+  2. 权限控制 - 限制在用户主目录操作，不访问其他目录
+  3. 系统保护 - 禁止修改系统配置文件和关键设置
+  4. 数据安全 - 操作前备份重要文件
+  5. 命令审查 - 执行命令前思考对系统的影响
+  6. 最小权限原则 - 只执行必要命令
+  7. 回滚能力 - 确保修改可逆
+  8. 网络安全 - 不开放不必要端口
 
-**任务完成**
--配置完成以后输出[RESULT] 
--最终结果用 [RESULT] 标签包围
+现在开始执行任务。"""
 
-现在开始执行系统网络安全检查任务。"""
-
-    def _call_deepseek_api(self, messages: List[Dict]) -> str:
-        """调用DeepSeek API，带重试机制"""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
-        data = {
-            "model": "deepseek-chat",
-            "messages": messages,
-            "max_tokens": 4000,
-            "temperature": 0.3
-        }
-
-        max_retries = 3
-        retry_delays = [5, 10, 15]  # 重试延迟（秒）
-
-        for attempt in range(max_retries + 1):  # 包括初始尝试
-            try:
-                if attempt > 0:
-                    print(f"正在进行第 {attempt} 次重试...（等待 {retry_delays[attempt-1]} 秒）")
-                    time.sleep(retry_delays[attempt-1])
-
-                # 增加超时时间
-                response = requests.post(
-                    self.api_url,
-                    headers=headers,
-                    json=data,
-                    timeout=60,  # 增加到60秒
-                    verify=True  # 确保SSL验证
-                )
-                response.raise_for_status()
-
-                result = response.json()["choices"][0]["message"]["content"]
-
-                if attempt > 0:
-                    print(f"第 {attempt} 次重试成功！")
-
-                return result
-
-            except requests.exceptions.Timeout as e:
-                error_msg = f"API调用超时: {str(e)}"
-                if attempt < max_retries:
-                    print(f"警告: {error_msg}")
-                    continue
-                else:
-                    print(f"错误: 所有重试均失败: {error_msg}")
-                    return f"API调用错误: {error_msg}"
-
-            except requests.exceptions.ConnectionError as e:
-                error_msg = f"网络连接错误: {str(e)}"
-                if attempt < max_retries:
-                    print(f"警告: {error_msg}")
-                    continue
-                else:
-                    print(f"错误: 所有重试均失败: {error_msg}")
-                    return f"API调用错误: {error_msg}"
-
-            except requests.exceptions.HTTPError as e:
-                error_msg = f"HTTP错误: {e.response.status_code} - {str(e)}"
-                if attempt < max_retries and e.response.status_code >= 500:
-                    # 服务器错误可以重试
-                    print(f"警告: {error_msg}")
-                    continue
-                else:
-                    print(f"错误: HTTP错误，无法重试: {error_msg}")
-                    return f"API调用错误: {error_msg}"
-
-            except requests.exceptions.RequestException as e:
-                error_msg = f"请求异常: {str(e)}"
-                if attempt < max_retries:
-                    print(f"警告: {error_msg}")
-                    continue
-                else:
-                    print(f"错误: 所有重试均失败: {error_msg}")
-                    return f"API调用错误: {error_msg}"
-
-            except (KeyError, ValueError, json.JSONDecodeError) as e:
-                error_msg = f"响应解析错误: {str(e)}"
-                print(f"错误: 响应格式错误: {error_msg}")
-                return f"API调用错误: {error_msg}"
-
-            except Exception as e:
-                error_msg = f"未知错误: {str(e)}"
-                print(f"错误: 未知错误: {error_msg}")
-                return f"API调用错误: {error_msg}"
-
-    def _execute_linux_command(self, command: str) -> Tuple[str, int]:
-        """使用Shell接口执行命令"""
-        try:
-            # 使用Shell接口执行命令，在终端中显示
-            output, return_code = self.shell_interface.execute_command(command)
-            return output, return_code
-        except Exception as e:
-            return f"Shell接口执行错误: {str(e)}", 1
-
+      
     def _parse_agent_response(self, response: str) -> Dict[str, List[str]]:
         """解析Agent响应，提取不同类型的内容"""
         parsed = {
@@ -254,23 +184,22 @@ ls -la
             "observe": [],
             "result": []
         }
-        
+
         # 提取THINK内容
         think_pattern = r'\[THINK\](.*?)\[/THINK\]'
         parsed["think"] = re.findall(think_pattern, response, re.DOTALL)
-        
-        # 提取EXEC内容
-        exec_pattern = r'\[EXEC\](.*?)\[/EXEC\]'
-        parsed["exec"] = re.findall(exec_pattern, response, re.DOTALL)
-        
+
+        # 使用EXEC管理器提取EXEC内容
+        parsed["exec"] = self.exec_manager.parse_exec_commands(response)
+
         # 提取OBSERVE内容
         observe_pattern = r'\[OBSERVE\](.*?)\[/OBSERVE\]'
         parsed["observe"] = re.findall(observe_pattern, response, re.DOTALL)
-        
+
         # 提取RESULT内容
         result_pattern = r'\[RESULT\](.*?)\[/RESULT\]'
         parsed["result"] = re.findall(result_pattern, response, re.DOTALL)
-        
+
         return parsed
 
     def _format_output(self, content: str, tag_type: str) -> None:
@@ -362,7 +291,7 @@ ls -la
             messages = self.context_manager.truncate_context_if_needed(messages)
 
             # 获取AI响应
-            ai_response = self._call_deepseek_api(messages)
+            ai_response = self.api_manager.call_deepseek_api(messages)
             if "API调用错误" in ai_response:
                 self._format_output(ai_response, "error")
                 # 保存错误到对话记录
@@ -383,6 +312,16 @@ ls -la
             # 解析响应
             parsed = self._parse_agent_response(ai_response)
 
+            # 检查并处理附加提示词注入
+            messages, prompt_injected = self.additional_prompt_manager.check_and_inject_additional_prompt(
+                ai_response, messages
+            )
+
+            # 如果注入了附加提示词，则跳过当前轮次的执行
+            if prompt_injected:
+                print("--- 附加提示词已注入，继续下一轮思考 ---")
+                continue
+
             # 显示思考过程
             for think in parsed["think"]:
                 self._format_output(think, "think")
@@ -393,13 +332,12 @@ ls -la
                 command = exec_cmd.strip()
                 if command:
                     self._format_output(f"执行命令: {command}", "exec")
-                    output, return_code = self._execute_linux_command(command)
 
-                    # 显示命令输出
-                    if output:
-                        print(f"命令输出:\n{output}")
-                    else:
-                        print("命令无输出")
+                    # 使用EXEC管理器执行命令
+                    output, return_code, output_info = self.exec_manager.execute_command_and_get_output(command)
+
+                    # 显示命令输出信息
+                    print(output_info)
                     print(f"返回码: {return_code}")
 
                     # 将执行结果添加到上下文和对话记录
@@ -450,7 +388,7 @@ def main():
     print("Basic Shell Agent")
     print("专注于Linux环境的思考-执行-观察循环")
     print("-" * 40)
-    
+
     agent = BasicShellAgent()
     
     while True:
@@ -459,9 +397,16 @@ def main():
             if user_input.lower() in ['quit', 'exit', '退出']:
                 print("再见!")
                 break
-            
+
             if user_input:
-                agent.run_task(user_input)
+                # 检查是否为系统命令
+                if agent.system_commands_manager.is_system_command(user_input):
+                    is_system_cmd, result_msg, should_continue = agent.system_commands_manager.execute_system_command(user_input)
+                    print(f"\n系统命令: {result_msg}")
+                    if not should_continue:
+                        continue
+                else:
+                    agent.run_task(user_input)
             
         except KeyboardInterrupt:
             print("\n\n程序被用户中断")
