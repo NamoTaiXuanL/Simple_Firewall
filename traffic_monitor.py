@@ -13,17 +13,20 @@ import threading
 from datetime import datetime
 from collections import defaultdict, deque
 import json
+import logging
+import os
 
 
 class TrafficMonitor:
     """流量监控核心类"""
 
-    def __init__(self, history_length=300):
+    def __init__(self, history_length=300, log_level=logging.INFO):
         """
         初始化流量监控器
 
         Args:
             history_length (int): 历史记录保存的秒数，默认300秒(5分钟)
+            log_level (int): 日志级别
         """
         self.history_length = history_length
 
@@ -34,7 +37,16 @@ class TrafficMonitor:
             'upload_speed': 0, 'download_speed': 0,
             'last_update': time.time()
         })
+
+        # 网络接口流量统计
+        self.interface_traffic = defaultdict(lambda: {
+            'upload': 0, 'download': 0,
+            'upload_speed': 0, 'download_speed': 0,
+            'last_update': time.time()
+        })
+
         self.last_network_stats = psutil.net_io_counters()
+        self.last_interface_stats = {}
         self.last_process_stats = {}
         self.traffic_monitoring = False
         self.traffic_lock = threading.Lock()
@@ -42,10 +54,30 @@ class TrafficMonitor:
         # 监控线程
         self.monitor_thread = None
 
-    def log(self, message):
+        # 异常检测和告警
+        self.alerts_enabled = True
+        self.upload_threshold = 10 * 1024 * 1024  # 10MB/s 上传阈值
+        self.download_threshold = 50 * 1024 * 1024  # 50MB/s 下载阈值
+        self.alert_cooldown = 60  # 告警冷却时间（秒）
+        self.last_alert_time = {}
+
+        # 设置日志
+        self.setup_logging(log_level)
+
+    def setup_logging(self, log_level):
+        """设置日志系统"""
+        self.logger = logging.getLogger('TrafficMonitor')
+        self.logger.setLevel(log_level)
+
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+
+    def log(self, message, level=logging.INFO):
         """日志输出"""
-        timestamp = datetime.now().strftime('%H:%M:%S')
-        print(f"[流量监控 {timestamp}] {message}")
+        self.logger.log(level, message)
 
     def start_monitoring(self):
         """开始流量监控"""
@@ -93,9 +125,13 @@ class TrafficMonitor:
 
         # 获取系统总流量
         current_network_stats = psutil.net_io_counters()
+        current_interface_stats = psutil.net_io_counters(pernic=True)
 
         # 计算系统流量速度（字节/秒）
         time_diff = current_time - getattr(self, '_last_system_update', current_time)
+        upload_speed = 0
+        download_speed = 0
+
         if time_diff > 0:
             bytes_sent_diff = current_network_stats.bytes_sent - self.last_network_stats.bytes_sent
             bytes_recv_diff = current_network_stats.bytes_recv - self.last_network_stats.bytes_recv
@@ -110,14 +146,115 @@ class TrafficMonitor:
                     'upload_speed': upload_speed,
                     'download_speed': download_speed,
                     'total_upload': current_network_stats.bytes_sent,
-                    'total_download': current_network_stats.bytes_recv
+                    'total_download': current_network_stats.bytes_recv,
+                    'interface_stats': dict(current_interface_stats)
                 })
 
             self.last_network_stats = current_network_stats
             self._last_system_update = current_time
 
+        # 更新网络接口流量统计
+        self._update_interface_traffic(current_interface_stats, current_time)
+
+        # 异常检测和告警
+        if self.alerts_enabled:
+            self._check_traffic_alerts(upload_speed, download_speed, current_time)
+
         # 更新进程流量统计
         self._update_process_traffic(current_time)
+
+    def _update_interface_traffic(self, current_interface_stats, current_time):
+        """更新网络接口流量统计"""
+        try:
+            with self.traffic_lock:
+                for interface, stats in current_interface_stats.items():
+                    if interface in self.last_interface_stats:
+                        last_stats = self.last_interface_stats[interface]
+                        time_diff = current_time - self.interface_traffic[interface]['last_update']
+
+                        if time_diff > 0:
+                            bytes_sent_diff = stats.bytes_sent - last_stats['bytes_sent']
+                            bytes_recv_diff = stats.bytes_recv - last_stats['bytes_recv']
+
+                            # 更新接口流量速度（字节/秒）
+                            self.interface_traffic[interface]['upload_speed'] = bytes_sent_diff / time_diff
+                            self.interface_traffic[interface]['download_speed'] = bytes_recv_diff / time_diff
+
+                            # 累计总流量
+                            self.interface_traffic[interface]['upload'] += bytes_sent_diff
+                            self.interface_traffic[interface]['download'] += bytes_recv_diff
+
+                    self.interface_traffic[interface]['last_update'] = current_time
+
+            self.last_interface_stats = {name: {
+                'bytes_sent': stats.bytes_sent,
+                'bytes_recv': stats.bytes_recv
+            } for name, stats in current_interface_stats.items()}
+
+        except Exception as e:
+            self.log(f"更新接口流量统计时出错: {e}", logging.ERROR)
+
+    def _check_traffic_alerts(self, upload_speed, download_speed, current_time):
+        """检查流量异常并发送告警"""
+        try:
+            # 检查上传速度异常
+            if upload_speed > self.upload_threshold:
+                alert_key = 'high_upload'
+                if self._should_send_alert(alert_key, current_time):
+                    self.log(f"⚠️ 流量告警: 上传速度过高 - {self.format_bytes(upload_speed)}/s (阈值: {self.format_bytes(self.upload_threshold)}/s)", logging.WARNING)
+
+            # 检查下载速度异常
+            if download_speed > self.download_threshold:
+                alert_key = 'high_download'
+                if self._should_send_alert(alert_key, current_time):
+                    self.log(f"⚠️ 流量告警: 下载速度过高 - {self.format_bytes(download_speed)}/s (阈值: {self.format_bytes(self.download_threshold)}/s)", logging.WARNING)
+
+            # 检查接口流量异常
+            with self.traffic_lock:
+                for interface, stats in self.interface_traffic.items():
+                    if stats['upload_speed'] > self.upload_threshold:
+                        alert_key = f'high_upload_{interface}'
+                        if self._should_send_alert(alert_key, current_time):
+                            self.log(f"⚠️ 接口告警: {interface} 上传速度过高 - {self.format_bytes(stats['upload_speed'])}/s", logging.WARNING)
+
+                    if stats['download_speed'] > self.download_threshold:
+                        alert_key = f'high_download_{interface}'
+                        if self._should_send_alert(alert_key, current_time):
+                            self.log(f"⚠️ 接口告警: {interface} 下载速度过高 - {self.format_bytes(stats['download_speed'])}/s", logging.WARNING)
+
+        except Exception as e:
+            self.log(f"流量异常检测时出错: {e}", logging.ERROR)
+
+    def _should_send_alert(self, alert_key, current_time):
+        """检查是否应该发送告警（考虑冷却时间）"""
+        if alert_key not in self.last_alert_time:
+            self.last_alert_time[alert_key] = 0
+
+        time_since_last = current_time - self.last_alert_time[alert_key]
+        if time_since_last >= self.alert_cooldown:
+            self.last_alert_time[alert_key] = current_time
+            return True
+        return False
+
+    def set_alert_thresholds(self, upload_threshold=None, download_threshold=None, cooldown=None):
+        """设置告警阈值"""
+        if upload_threshold is not None:
+            self.upload_threshold = upload_threshold
+            self.log(f"上传告警阈值已设置为: {self.format_bytes(upload_threshold)}/s")
+
+        if download_threshold is not None:
+            self.download_threshold = download_threshold
+            self.log(f"下载告警阈值已设置为: {self.format_bytes(download_threshold)}/s")
+
+        if cooldown is not None:
+            self.alert_cooldown = cooldown
+            self.log(f"告警冷却时间已设置为: {cooldown}秒")
+
+    def enable_alerts(self, enabled=True):
+        """启用/禁用告警"""
+        self.alerts_enabled = enabled
+        status = "启用" if enabled else "禁用"
+        self.log(f"流量告警已{status}")
 
     def _update_process_traffic(self, current_time):
         """更新进程流量统计"""
@@ -187,6 +324,41 @@ class TrafficMonitor:
             'upload_speed_human': '0 B/s',
             'download_speed_human': '0 B/s'
         }
+
+    def get_interface_stats(self, min_speed=1024):
+        """获取网络接口流量统计
+
+        Args:
+            min_speed (int): 最小速度阈值（字节/秒），默认1KB/s
+
+        Returns:
+            list: 网络接口流量统计列表，按总流量排序
+        """
+        interface_stats = []
+
+        with self.traffic_lock:
+            for interface, stats in self.interface_traffic.items():
+                # 过滤条件：速度达到阈值
+                if (stats['upload_speed'] > min_speed or
+                    stats['download_speed'] > min_speed or
+                    stats['upload'] > 0 or
+                    stats['download'] > 0):
+
+                    interface_stats.append({
+                        'interface': interface,
+                        'upload_speed': stats['upload_speed'],
+                        'download_speed': stats['download_speed'],
+                        'total_upload': stats['upload'],
+                        'total_download': stats['download'],
+                        'upload_speed_human': self.format_bytes(stats['upload_speed']) + '/s',
+                        'download_speed_human': self.format_bytes(stats['download_speed']) + '/s',
+                        'upload_human': self.format_bytes(stats['upload']),
+                        'download_human': self.format_bytes(stats['download'])
+                    })
+
+        # 按总流量排序
+        interface_stats.sort(key=lambda x: x['total_upload'] + x['total_download'], reverse=True)
+        return interface_stats
 
     def get_process_traffic_stats(self, min_speed=1024, min_total=1024*1024):
         """获取进程流量统计

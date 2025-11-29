@@ -14,11 +14,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 避免修改已实现的功能的代码  只修改必要的代码
 
 
-
-## Git 使用规范
-- 提交信息使用中文，简洁明了
-- 小步提交，避免一次性大量修改
-- 功能完成后及时提交 
+## 制作流程
+没有我的许可 不许随意新建文件
+不得做多余动作
+我让你做什么你就做什么 让你写python文件就写python文件 不要写脚本
+让你剥离代码制作单独模块 你就剥离出来 不要做其他的
 
 
 ## AGENTS
