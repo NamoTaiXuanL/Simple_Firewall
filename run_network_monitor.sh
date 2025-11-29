@@ -3,18 +3,20 @@
 # 进程网络检测工具启动脚本
 
 echo "进程网络检测工具启动选项："
-echo "1) GUI模式 - 图形界面 (默认)"
+echo "1) GUI模式 - 图形界面 (默认) - 包含流量监控"
 echo "2) 监听端口检测 - 命令行模式"
 echo "3) 活跃连接检测 - 命令行模式"
 echo "4) 进程网络统计 - 命令行模式"
-echo "5) 退出"
+echo "5) 实时流量监控 - 命令行模式"
+echo "6) 进程流量统计 - 命令行模式"
+echo "7) 退出"
 echo ""
 
-read -p "请选择模式 (1-5): " choice
+read -p "请选择模式 (1-7): " choice
 
 case $choice in
     1)
-        echo "启动GUI模式..."
+        echo "启动GUI模式（包含流量监控）..."
         python3 network_monitor.py
         ;;
     2)
@@ -30,6 +32,14 @@ case $choice in
         python3 network_monitor.py --cli process
         ;;
     5)
+        echo "启动实时流量监控..."
+        python3 network_monitor.py --cli traffic
+        ;;
+    6)
+        echo "启动进程流量统计..."
+        python3 network_monitor.py --cli process-traffic
+        ;;
+    7)
         echo "退出"
         exit 0
         ;;
